@@ -1,21 +1,26 @@
+const express = require('express');
+const router = express.Router();
 const path = require('path');
-const crypto = require('crypto');
 const multer = require('multer');
-const router = require('express').Router();
-const auth = require('../middleware/auth');
-const ctrl = require('../controllers/receiptController');
+const receiptController = require('../controllers/receiptController');
 
+// disk storage for uploads
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, path.join(__dirname, '../../uploads')),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `${Date.now()}_${crypto.randomBytes(4).toString('hex')}${ext}`);
-  }
+  destination: (req, file, cb) => cb(null, path.join(__dirname, '..', '..', 'uploads')),
+  filename: (req, file, cb) => {
+    const ts = Date.now();
+    const base = (file.originalname || 'file').replace(/\s+/g, '_');
+    const ext = path.extname(base) || '';
+    cb(null, `${ts}_${Math.random().toString(16).slice(2)}${ext}`);
+  },
 });
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
-router.use(auth);
-router.post('/upload', upload.single('file'), ctrl.upload);
-router.delete('/:filename', ctrl.remove);
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+});
+
+// POST /api/receipts/upload  -> multer.single('file') then controller
+router.post('/upload', upload.single('file'), receiptController.upload);
 
 module.exports = router;
