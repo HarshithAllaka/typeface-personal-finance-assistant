@@ -1,4 +1,6 @@
 const Transaction = require('../models/Transaction');
+const path = require('path');
+const { extractTable } = require('../services/parseTablePdf');
 
 // create new transaction
 exports.create = async (req, res) => {
@@ -92,6 +94,26 @@ exports.analytics = async (req, res) => {
     ]);
 
     res.json({ byCategory, byDate });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+};
+
+exports.importPdf = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (ext !== '.pdf') return res.status(415).json({ error: 'Only PDF is supported' });
+
+    const { rows, error } = await extractTable(req.file.path);
+    if (error) return res.status(400).json({ error });
+
+    if (!rows.length) return res.status(400).json({ error: 'No valid rows found in PDF' });
+
+    // attach user id
+    const docs = rows.map(r => ({ ...r, user: req.userId }));
+    const result = await Transaction.insertMany(docs, { ordered: false });
+    res.status(201).json({ inserted: result.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -14,4 +14,7 @@ const txnSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+txnSchema.index({ user: 1, date: -1 });
+txnSchema.index({ user: 1, category: 1 });
+
 module.exports = mongoose.model('Transaction', txnSchema);
