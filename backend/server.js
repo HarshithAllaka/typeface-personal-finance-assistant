@@ -5,6 +5,9 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
+const authRoutes = require('./src/routes/auth');
+
+
 const connectDB = require('./src/utils/db');
 
 const app = express();
@@ -21,6 +24,12 @@ app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
 // health check
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+app.use('/api/auth', authRoutes);
+
+const txnRoutes = require('./src/routes/transactions');
+app.use('/api/transactions', txnRoutes);
+
 
 const PORT = process.env.PORT || 5000;
 
