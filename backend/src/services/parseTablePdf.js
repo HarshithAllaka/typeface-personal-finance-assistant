@@ -1,107 +1,99 @@
+// backend/src/services/parseTablePdf.js
 const fs = require('fs');
 const pdf = require('pdf-parse');
 
-function normToken(s = '') {
-  // lowercase, trim, and strip non-letters so "Amount", "AMOUNT", "Amt", "Amount:" all normalize
-  return String(s).toLowerCase().trim().replace(/[^a-z]/g, '');
-}
-
-function splitRow(line) {
-  // try tabs, then 2+ spaces, then commas
-  if (/\t/.test(line)) return line.split('\t').map(s => s.trim());
-  const bySpaces = line.trim().split(/\s{2,}/).map(s => s.trim());
-  if (bySpaces.length > 1) return bySpaces;
-  return line.split(',').map(s => s.trim());
-}
-
-function parseAmount(str) {
-  if (!str) return null;
-  const cleaned = String(str).replace(/[₹,\s]/g, '');
-  const v = parseFloat(cleaned);
-  return isNaN(v) ? null : v;
-}
-
+/**
+ * Robust parser for PDFs where header/columns may be concatenated.
+ * Expected columns: Date, Type, Category, Description, Amount
+ * Example line from extractor:
+ * "2025-08-01incomeSalaryMonthly salary3000"
+ */
 async function extractTable(filePath) {
-  const buf = fs.readFileSync(filePath);
-  const data = await pdf(buf);
-  const text = (data.text || '').replace(/\r/g, '');
-  const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
+  try {
+    const data = await pdf(fs.readFileSync(filePath));
+    let text = (data.text || '')
+      .replace(/\r/g, '')
+      .replace(/\u00A0/g, ' ')      // non-breaking space to normal space
+      .replace(/[ \t]+/g, ' ');     // collapse spaces
 
-  // --- find a header row, flexibly ---
-  let headerIdx = -1;
-  let headersRaw = [];
-  for (let i = 0; i < lines.length; i++) {
-    const cols = splitRow(lines[i]);
-    if (cols.length < 3) continue;
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-    const norm = cols.map(normToken);
-    // allow synonyms like "amt" for amount, "desc" for description
-    const set = new Set(norm);
-    const hasDate = [...set].some(x => x === 'date');
-    const hasType = [...set].some(x => x === 'type');
-    const hasCategory = [...set].some(x => x === 'category' || x === 'cat');
-    const hasDesc = [...set].some(x => x === 'description' || x === 'desc');
-    const hasAmount = [...set].some(x => x === 'amount' || x === 'amt');
+    // --- Find header line (very forgiving) ---
+    // Accepts: "Date Type Category Description Amount"
+    // or "DateTypeCategoryDescriptionAmount"
+    const headerIdx = lines.findIndex(L => {
+      const norm = L.replace(/[,|]/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+      if (/(^|\s)date(\s|$)/.test(norm) &&
+          /( ^|\s)type(\s|$)/.test(norm) &&
+          /( ^|\s)category(\s|$)/.test(norm) &&
+          /( ^|\s)description(\s|$)/.test(norm) &&
+          /( ^|\s)amount(\s|$)/.test(norm)) return true;
 
-    if (hasDate && hasType && hasCategory && hasDesc && hasAmount) {
-      headerIdx = i;
-      headersRaw = cols; // keep original ordering to map columns
-      break;
-    }
-  }
-
-  if (headerIdx === -1) {
-    return { rows: [], error: 'Could not find a header row with Date/Type/Category/Description/Amount' };
-  }
-
-  // map column names -> index using normalized tokens
-  const nameToIdx = {};
-  headersRaw.forEach((h, idx) => {
-    const n = normToken(h);
-    if (n === 'date') nameToIdx.date = idx;
-    else if (n === 'type') nameToIdx.type = idx;
-    else if (n === 'category' || n === 'cat') nameToIdx.category = idx;
-    else if (n === 'description' || n === 'desc') nameToIdx.description = idx;
-    else if (n === 'amount' || n === 'amt') nameToIdx.amount = idx;
-  });
-
-  const required = ['date', 'type', 'category', 'description', 'amount'];
-  const missing = required.filter(k => !(k in nameToIdx));
-  if (missing.length) {
-    return { rows: [], error: `Missing columns: ${missing.join(', ')}` };
-  }
-
-  const rows = [];
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const raw = splitRow(lines[i]);
-    const dateStr = raw[nameToIdx.date];
-    const typeStr = raw[nameToIdx.type];
-    const catStr = raw[nameToIdx.category];
-    const descStr = raw[nameToIdx.description];
-    const amtStr = raw[nameToIdx.amount];
-
-    if ([dateStr, typeStr, catStr, amtStr].some(v => v == null)) continue;
-
-    const dt = new Date(String(dateStr).replace(/[-.]/g, '/'));
-    const amount = parseAmount(amtStr);
-    const tNorm = normToken(typeStr);
-    const type =
-      tNorm.includes('income') || tNorm === 'inc' ? 'income' :
-      tNorm.includes('expense') || tNorm === 'exp' ? 'expense' : null;
-
-    if (!amount || !type || isNaN(dt)) continue;
-
-    rows.push({
-      type,
-      amount,
-      category: catStr || 'General',
-      description: descStr || '',
-      date: dt,
-      source: 'pdf'
+      const joined = L.replace(/\s+/g, '').toLowerCase();
+      return joined === 'datetypecategorydescriptionamount';
     });
-  }
 
-  return { rows, error: null };
+    if (headerIdx === -1) {
+      return { rows: [], error: 'Could not find a header row with Date/Type/Category/Description/Amount' };
+    }
+
+    const rows = [];
+
+    // --- Parse rows after header ---
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      const raw = lines[i];
+      if (!raw) continue;
+      if (/^total\b/i.test(raw)) continue;
+
+      // 1) Match start: date (10 chars) then (income|expense) possibly glued
+      const m = raw.match(/^(\d{4}-\d{2}-\d{2})(income|expense)(.*)$/i);
+      if (!m) continue;
+
+      const dateStr = m[1];
+      const type = m[2].toLowerCase();
+      let tail = (m[3] || '').trim();
+
+      // 2) Last token must be amount (allow 1,234.56 or -123.45)
+      const amountMatch = tail.match(/(-?\d{1,3}(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?|\d+)$/);
+      if (!amountMatch) continue;
+      const amountStr = amountMatch[0].replace(/,/g, '');
+      const amount = Number(amountStr);
+      if (Number.isNaN(amount)) continue;
+
+      // Remove trailing amount from tail
+      tail = tail.slice(0, tail.length - amountMatch[0].length).trim();
+
+      // 3) The first token of tail is category (letters/words); rest is description
+      const tailParts = tail.split(/\s+/).filter(Boolean);
+      if (!tailParts.length) continue;
+
+      const category = titleCase(tailParts[0]);
+      const description = tailParts.slice(1).join(' ').trim();
+
+      rows.push({
+        date: new Date(dateStr),
+        type,
+        category,
+        description,
+        amount,
+        source: 'pdf',
+      });
+    }
+
+    if (!rows.length) {
+      return { rows: [], error: 'No valid rows found in PDF' };
+    }
+    return { rows, error: null };
+  } catch (e) {
+    return { rows: [], error: e.message };
+  }
+}
+
+function titleCase(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .trim();
 }
 
 module.exports = { extractTable };

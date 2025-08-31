@@ -1,99 +1,164 @@
-import { useState } from 'react'
-import api from '../shared/api'
+// frontend/src/pages/Receipts.jsx
+import { useState } from "react";
+import api from "../shared/api";
 
-export default function Receipts(){
-  const [file,setFile] = useState(null)
-  const [res,setRes] = useState(null)
-  const [err,setErr] = useState('')
-  const [loading,setLoading] = useState(false)
-  const [adding,setAdding] = useState(false)
+export default function Receipts() {
+  const [file, setFile] = useState(null);
 
-  async function upload(){
-    if (!file) return
-    setErr(''); setRes(null); setLoading(true)
-    try{
-      const fd = new FormData()
-      fd.append('file', file)           // key MUST be 'file' for multer.single('file')
-      const { data } = await api.post('/api/receipts/upload', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
-      setRes(data)
-    }catch(e){
-      setErr(e?.response?.data?.error || 'Upload failed')
-    }finally{
-      setLoading(false)
+  // OCR result (single receipt)
+  const [suggestions, setSuggestions] = useState(null); // { type, amount, date, category }
+  const [rawText, setRawText] = useState("");           // preview text
+
+  // UI state
+  const [uploading, setUploading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  async function handleUploadReceipt() {
+    if (!file) return alert("Pick a file first");
+
+    const fd = new FormData();
+    fd.append("file", file);
+
+    try {
+      setUploading(true);
+      // your existing OCR endpoint
+      const { data } = await api.post("/api/receipts/upload", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      // Expecting: { message, file, suggestions, rawText }
+      setSuggestions(data.suggestions || null);
+      setRawText(data.rawText || "");
+    } catch (e) {
+      alert(e?.response?.data?.error || e.message);
+    } finally {
+      setUploading(false);
     }
   }
 
-  async function addFromSuggestion(){
-    if (!res?.suggestions) return
-    setAdding(true)
-    try{
-      const s = res.suggestions
-      await api.post('/api/transactions', {
-        type: s.type || 'expense',
-        amount: Number(s.amount || 0),
-        category: s.category || 'General',
-        date: s.date ? new Date(s.date) : new Date(),
-        description: 'From receipt',
-        source: 'receipt',
-        receiptFile: res.file || ''
-      })
-      alert('Transaction added')
-    }catch(e){
-      alert(e?.response?.data?.error || 'Failed to add')
-    }finally{
-      setAdding(false)
+  async function handleAddSuggestion() {
+    if (!suggestions) return alert("No suggestion to add yet.");
+    // Basic validation to mirror server rules
+    if (!suggestions.type || suggestions.amount == null || !suggestions.date) {
+      return alert("type, amount, and date required");
+    }
+
+    try {
+      setAdding(true);
+      await api.post("/api/transactions", {
+        ...suggestions,
+        // ensure date is an ISO string or yyyy-mm-dd
+        date: suggestions.date,
+        source: "receipt",
+      });
+      alert("Transaction saved.");
+      // Clear only the suggestion (keep file for optional bulk import)
+      // setFile(null);
+      // setRawText("");
+      // setSuggestions(null);
+    } catch (e) {
+      alert(e?.response?.data?.error || e.message);
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleImportPdf() {
+    if (!file) return alert("Pick a PDF first");
+
+    const fd = new FormData();
+    fd.append("file", file);
+
+    try {
+      setImporting(true);
+      // bulk import endpoint you tested in Postman
+      const { data } = await api.post("/api/transactions/import-pdf", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      // Expecting: { inserted: N }
+      alert(`Imported ${data.inserted ?? 0} transactions from PDF.`);
+      // You can optionally clear UI here:
+      // setFile(null);
+      // setRawText("");
+      // setSuggestions(null);
+    } catch (e) {
+      alert(e?.response?.data?.error || e.message);
+    } finally {
+      setImporting(false);
     }
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Receipts</h1>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
-        <div className="flex items-center gap-3">
-          <input
-            type="file"
-            onChange={e=>setFile(e.target.files?.[0] || null)}
-            className="file:mr-3 file:px-3 file:py-2 file:rounded file:border-0 file:bg-white file:text-black" />
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+        <div className="flex flex-wrap items-center gap-5">
+          <label className="inline-flex items-center">
+            <input
+              type="file"
+              accept="application/pdf,image/*"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              className="hidden"
+              id="receipt-file"
+            />
+            <span className="px-4 py-2 rounded border border-zinc-700 hover:bg-zinc-800 cursor-pointer">
+              Choose File
+            </span>
+          </label>
+          <span className="text-sm text-zinc-400">
+            {file ? file.name : "No file chosen"}
+          </span>
+
           <button
-            disabled={!file || loading}
-            onClick={upload}
-            className="px-3 py-2 rounded bg-white text-black disabled:opacity-40">
-            {loading ? 'Uploading…' : 'Upload'}
+            onClick={handleUploadReceipt}
+            disabled={!file || uploading}
+            className="px-4 py-2 rounded bg-white text-black disabled:opacity-50"
+          >
+            {uploading ? "Uploading…" : "Upload (OCR)"}
+          </button>
+
+          <button
+            onClick={handleImportPdf}
+            disabled={!file || importing}
+            className="px-4 py-2 rounded bg-white text-black disabled:opacity-50"
+            title="Import rows from a bank/statement PDF table"
+          >
+            {importing ? "Importing…" : "Import PDF as transactions (bulk)"}
           </button>
         </div>
 
-        {err && <p className="text-red-400 text-sm">{err}</p>}
+        <div className="grid lg:grid-cols-2 gap-4 mt-4">
+          {/* Suggestions (single txn) */}
+          <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+            <div className="text-sm text-zinc-400 mb-2">Suggestions</div>
+            <pre className="text-xs whitespace-pre-wrap">
+              {JSON.stringify(suggestions || {
+                type: "expense",
+                amount: null,
+                date: new Date().toISOString(),
+                category: "General",
+              }, null, 2)}
+            </pre>
 
-        {res?.warning && <p className="text-amber-400 text-sm">{res.warning}</p>}
-
-
-        {res && (
-          <div className="mt-4 grid md:grid-cols-2 gap-4">
-            <div className="bg-zinc-950 border border-zinc-800 rounded p-3">
-              <div className="text-sm text-zinc-400 mb-2">Suggestions</div>
-              <pre className="text-xs whitespace-pre-wrap">
-                {JSON.stringify(res.suggestions, null, 2)}
-              </pre>
-              <button
-                onClick={addFromSuggestion}
-                disabled={adding}
-                className="mt-3 px-3 py-2 rounded bg-white text-black disabled:opacity-40">
-                {adding ? 'Adding…' : 'Add as transaction'}
-              </button>
-            </div>
-
-            <div className="bg-zinc-950 border border-zinc-800 rounded p-3">
-              <div className="text-sm text-zinc-400 mb-2">Extracted text (preview)</div>
-              <pre className="text-xs max-h-80 overflow-auto whitespace-pre-wrap">
-                {res.rawText}
-              </pre>
-            </div>
+            <button
+              onClick={handleAddSuggestion}
+              disabled={!suggestions || adding}
+              className="mt-3 px-4 py-2 rounded bg-white text-black disabled:opacity-50"
+            >
+              {adding ? "Adding…" : "Add as transaction"}
+            </button>
           </div>
-        )}
+
+          {/* Extracted text preview (just for user info) */}
+          <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+            <div className="text-sm text-zinc-400 mb-2">Extracted text (preview)</div>
+            <pre className="text-xs whitespace-pre-wrap">
+              {rawText || "—"}
+            </pre>
+          </div>
+        </div>
       </div>
     </div>
-  )
+  );
 }
