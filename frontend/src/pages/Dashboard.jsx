@@ -19,7 +19,25 @@ export default function Dashboard(){
   }, [])
 
   if (err) return <p className="text-red-400">{err}</p>
-  if (!data) return <p className="text-zinc-400">Loading…</p>
+
+  // Skeleton while loading
+  if (!data) {
+    return (
+      <div className="space-y-6">
+        <div className="h-7 w-44 bg-zinc-800 rounded" />
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="h-72 bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+            <div className="h-4 w-40 bg-zinc-800 rounded mb-3" />
+            <div className="h-full w-full bg-zinc-950 border border-zinc-900 rounded" />
+          </div>
+          <div className="h-72 bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+            <div className="h-4 w-56 bg-zinc-800 rounded mb-3" />
+            <div className="h-full w-full bg-zinc-950 border border-zinc-900 rounded" />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // ---- Build datasets ----
   // Expenses by category (doughnut)
@@ -29,20 +47,41 @@ export default function Dashboard(){
   }
   const doughnutData = {
     labels: Object.keys(catTotals),
-    datasets: [{ data: Object.values(catTotals) }]
-  }
+    datasets: [{
+        data: Object.values(catTotals),
+        backgroundColor: [
+        '#f87171', // red
+        '#60a5fa', // blue
+        '#34d399', // green
+        '#fbbf24', // yellow
+        '#a78bfa', // purple
+        '#fb923c', // orange
+        '#2dd4bf'  // teal
+        ],
+        borderColor: '#18181b', // dark border to match theme
+        borderWidth: 2
+    }]
+    }
 
   // Income vs Expense by day (bar)
   const days = [...new Set(data.byDate.map(d => d.date))].sort()
   const income = days.map(d => data.byDate.find(x => x.date === d && x.type === 'income')?.total || 0)
   const expense = days.map(d => data.byDate.find(x => x.date === d && x.type === 'expense')?.total || 0)
   const barData = {
-    labels: days,
-    datasets: [
-      { label: 'Income', data: income },
-      { label: 'Expense', data: expense }
-    ]
-  }
+  labels: days,
+  datasets: [
+    { 
+      label: 'Income',
+      data: income,
+      backgroundColor: '#34d399' // green
+    },
+    { 
+      label: 'Expense',
+      data: expense,
+      backgroundColor: '#f87171' // red
+    }
+  ]
+}
 
   return (
     <div className="space-y-6">

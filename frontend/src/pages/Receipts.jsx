@@ -67,6 +67,9 @@ export default function Receipts(){
 
         {err && <p className="text-red-400 text-sm">{err}</p>}
 
+        {res?.warning && <p className="text-amber-400 text-sm">{res.warning}</p>}
+
+
         {res && (
           <div className="mt-4 grid md:grid-cols-2 gap-4">
             <div className="bg-zinc-950 border border-zinc-800 rounded p-3">

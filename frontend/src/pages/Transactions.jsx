@@ -62,6 +62,7 @@ export default function Transactions(){
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">Transactions</h1>
 
+      {/* Filters */}
       <div className="flex flex-wrap gap-2 items-end">
         <div className="flex flex-col">
           <label className="text-xs text-zinc-400">Type</label>
@@ -82,13 +83,22 @@ export default function Transactions(){
           <input type="date" value={to} onChange={e=>setTo(e.target.value)}
                  className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1" />
         </div>
-        <button onClick={()=>load(1)} className="px-3 py-2 rounded border border-zinc-700 hover:bg-zinc-800">
+        <button
+          disabled={loading}
+          onClick={()=>load(1)}
+          className="px-3 py-2 rounded border border-zinc-700 hover:bg-zinc-800 disabled:opacity-40">
           Apply
         </button>
         <div className="flex-1" />
-        <button onClick={startCreate} className="px-3 py-2 rounded bg-white text-black">+ New</button>
+        <button
+          disabled={loading}
+          onClick={startCreate}
+          className="px-3 py-2 rounded bg-white text-black disabled:opacity-40">
+          + New
+        </button>
       </div>
 
+      {/* Table */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-zinc-950/60">
@@ -117,14 +127,24 @@ export default function Transactions(){
         </table>
       </div>
 
+      {/* Pagination */}
       <div className="flex items-center gap-2 justify-end">
-        <button disabled={page<=1} onClick={()=>load(page-1)}
-                className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40">Prev</button>
+        <button
+          disabled={page<=1 || loading}
+          onClick={()=>load(page-1)}
+          className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40">
+          Prev
+        </button>
         <span className="text-sm text-zinc-400">Page {page} / {pages}</span>
-        <button disabled={page>=pages} onClick={()=>load(page+1)}
-                className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40">Next</button>
+        <button
+          disabled={page>=pages || loading}
+          onClick={()=>load(page+1)}
+          className="px-3 py-1 rounded border border-zinc-700 disabled:opacity-40">
+          Next
+        </button>
       </div>
 
+      {/* Modal */}
       {editing && (
         <div className="fixed inset-0 bg-black/60 grid place-items-center">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 w-[480px] max-w-[95vw] space-y-3">
