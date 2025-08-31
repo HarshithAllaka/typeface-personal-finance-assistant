@@ -1,103 +1,91 @@
 import { useEffect, useState } from 'react'
 import api from '../shared/api'
+import StatCard from '../components/StatCard'
+import QuickAction from '../components/QuickAction'
+import RecentList from '../components/RecentList'
+import { useNavigate } from 'react-router-dom'
 
-// chart.js setup
-import { Doughnut, Bar } from 'react-chartjs-2'
-import {
-  Chart, ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend
-} from 'chart.js'
-Chart.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend)
-
-export default function Dashboard(){
-  const [data, setData] = useState(null)
+export default function Dashboard() {
+  const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const [summary, setSummary] = useState({ totalIncome: 0, totalExpense: 0, net: 0, recent: [] })
+  const navigate = useNavigate()
 
   useEffect(() => {
-    api.get('/api/transactions/analytics')
-      .then(res => setData(res.data))
-      .catch(e => setErr(e?.response?.data?.error || 'Failed to load analytics'))
+    let alive = true
+    api.get('/api/transactions/summary')
+      .then(({ data }) => { if (alive) setSummary(data) })
+      .catch(e => { if (alive) setErr(e?.response?.data?.error || e.message) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
   }, [])
 
-  if (err) return <p className="text-red-400">{err}</p>
-
-  // Skeleton while loading
-  if (!data) {
-    return (
-      <div className="space-y-6">
-        <div className="h-7 w-44 bg-zinc-800 rounded" />
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="h-72 bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-            <div className="h-4 w-40 bg-zinc-800 rounded mb-3" />
-            <div className="h-full w-full bg-zinc-950 border border-zinc-900 rounded" />
-          </div>
-          <div className="h-72 bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-            <div className="h-4 w-56 bg-zinc-800 rounded mb-3" />
-            <div className="h-full w-full bg-zinc-950 border border-zinc-900 rounded" />
-          </div>
-        </div>
-      </div>
-    )
+  if (loading) {
+    return <div className="text-zinc-400">Loading…</div>
   }
-
-  // ---- Build datasets ----
-  // Expenses by category (doughnut)
-  const catTotals = {}
-  for (const r of data.byCategory) {
-    if (r.type === 'expense') catTotals[r.category] = (catTotals[r.category] || 0) + r.total
+  if (err) {
+    return <div className="text-rose-400">Error: {err}</div>
   }
-  const doughnutData = {
-    labels: Object.keys(catTotals),
-    datasets: [{
-        data: Object.values(catTotals),
-        backgroundColor: [
-        '#f87171', // red
-        '#60a5fa', // blue
-        '#34d399', // green
-        '#fbbf24', // yellow
-        '#a78bfa', // purple
-        '#fb923c', // orange
-        '#2dd4bf'  // teal
-        ],
-        borderColor: '#18181b', // dark border to match theme
-        borderWidth: 2
-    }]
-    }
-
-  // Income vs Expense by day (bar)
-  const days = [...new Set(data.byDate.map(d => d.date))].sort()
-  const income = days.map(d => data.byDate.find(x => x.date === d && x.type === 'income')?.total || 0)
-  const expense = days.map(d => data.byDate.find(x => x.date === d && x.type === 'expense')?.total || 0)
-  const barData = {
-  labels: days,
-  datasets: [
-    { 
-      label: 'Income',
-      data: income,
-      backgroundColor: '#34d399' // green
-    },
-    { 
-      label: 'Expense',
-      data: expense,
-      backgroundColor: '#f87171' // red
-    }
-  ]
-}
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Overview</h1>
-
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
-          <h2 className="mb-2 text-sm text-zinc-400">Expenses by Category</h2>
-          <Doughnut data={doughnutData} />
-        </div>
-
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
-          <h2 className="mb-2 text-sm text-zinc-400">Daily Income vs Expense</h2>
-          <Bar data={barData} />
-        </div>
+      <div>
+        <h1 className="text-2xl font-semibold">Welcome back 👋</h1>
+        <p className="text-zinc-400 text-sm">Manage your finances with ease.</p>
       </div>
+
+      {/* Quick actions */}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <QuickAction
+          title="Add Transaction"
+          desc="Quickly log income or expenses"
+          icon="➕"
+          onClick={() => navigate('/transactions')}
+        />
+        <QuickAction
+          title="Upload Receipt"
+          desc="Extract data from receipts"
+          icon="🧾"
+          onClick={() => navigate('/receipts')}
+        />
+        <QuickAction
+          title="View Analytics"
+          desc="See spending patterns"
+          icon="📊"
+          onClick={() => navigate('/analysis')}
+        />
+        <QuickAction
+          title="All Transactions"
+          desc="View and manage transactions"
+          icon="📚"
+          onClick={() => navigate('/transactions')}
+        />
+      </div>
+
+      {/* Stat cards */}
+      <div className="grid sm:grid-cols-3 gap-4">
+        <StatCard
+          title="Total Income"
+          value={summary.totalIncome.toLocaleString()}
+          icon="💰"
+          tone="green"
+        />
+        <StatCard
+          title="Total Expenses"
+          value={summary.totalExpense.toLocaleString()}
+          icon="🧾"
+          tone="red"
+        />
+        <StatCard
+          title="Net Balance"
+          value={summary.net.toLocaleString()}
+          icon="⚖️"
+          tone="blue"
+        />
+      </div>
+
+      {/* Recent list */}
+      <RecentList items={summary.recent} />
     </div>
   )
 }

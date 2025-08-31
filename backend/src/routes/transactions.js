@@ -12,6 +12,7 @@ router.get('/', ctrl.list);
 router.put('/:id', ctrl.update);
 router.delete('/:id', ctrl.remove);
 router.get('/analytics', ctrl.analytics);
+router.get('/summary', auth, ctrl.summary);
 
 // Multer for PDF import
 const storage = multer.diskStorage({

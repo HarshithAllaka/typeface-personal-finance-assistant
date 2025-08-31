@@ -167,3 +167,39 @@ exports.importPdf = async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 };
+// ───────────────────────────────────────────────────────────────────────────────
+// Summary: totals and recent transactions
+// GET /api/transactions/summary
+// ───────────────────────────────────────────────────────────────────────────────
+exports.summary = async (req, res) => {
+  try {
+    const user = req.userId;
+
+    // totals (income / expense)
+    const buckets = await Transaction.aggregate([
+      { $match: { user: new (require('mongoose').Types.ObjectId)(user) } },
+      { $group: { _id: '$type', total: { $sum: '$amount' } } }
+    ]);
+
+    let totalIncome = 0, totalExpense = 0;
+    for (const b of buckets) {
+      if (b._id === 'income') totalIncome = b.total;
+      if (b._id === 'expense') totalExpense = b.total;
+    }
+
+    // recent 5
+    const recent = await Transaction.find({ user })
+      .sort({ date: -1, _id: -1 })
+      .limit(5)
+      .lean();
+
+    res.json({
+      totalIncome,
+      totalExpense,
+      net: totalIncome - totalExpense,
+      recent
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+};

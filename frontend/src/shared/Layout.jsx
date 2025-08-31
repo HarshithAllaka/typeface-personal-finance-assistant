@@ -18,11 +18,13 @@ export default function Layout({ children }) {
   }
 
   const link = (to, label) => (
-    <Link to={to}
+    <Link
+      to={to}
       className={clsx(
         "px-3 py-2 rounded hover:bg-zinc-800",
         loc.pathname === to && "bg-zinc-800 text-white"
-      )}>
+      )}
+    >
       {label}
     </Link>
   )
@@ -35,15 +37,19 @@ export default function Layout({ children }) {
             {link('/', 'Dashboard')}
             {link('/transactions', 'Transactions')}
             {link('/receipts', 'Receipts')}
+            {link('/analysis', 'Analysis')}
           </nav>
           <div className="flex items-center gap-2">
+            {/* Optional theme toggle
             <button
               onClick={() => setDark(d => !d)}
               className="px-3 py-1 rounded border border-zinc-700 hover:bg-zinc-800">
               {dark ? '🌙' : '☀️'}
-            </button>
-            <button onClick={logout}
-              className="px-3 py-1 rounded border border-zinc-700 hover:bg-zinc-800">
+            </button> */}
+            <button
+              onClick={logout}
+              className="px-3 py-1 rounded border border-zinc-700 hover:bg-zinc-800"
+            >
               Logout
             </button>
           </div>

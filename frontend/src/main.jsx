@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard.jsx'
 import Transactions from './pages/Transactions.jsx'
 import Receipts from './pages/Receipts.jsx'
 import Layout from './shared/Layout.jsx'
+import Analysis from "./pages/Analysis";
 
 function Private({ children }) {
   const t = localStorage.getItem('token')
@@ -19,6 +20,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<Private><Layout><Dashboard/></Layout></Private>} />
       <Route path="/transactions" element={<Private><Layout><Transactions/></Layout></Private>} />
+      <Route path="/analysis" element={<Private><Layout><Analysis /></Layout></Private>} />
       <Route path="/receipts" element={<Private><Layout><Receipts/></Layout></Private>} />
     </Routes>
   </BrowserRouter>
