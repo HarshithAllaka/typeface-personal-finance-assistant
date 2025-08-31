@@ -9,15 +9,28 @@ function pickAmountFromLine(s) {
 function parseAmount(text = "") {
   const lines = text.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
 
-  // 1) Prefer explicit "Total" line
+  // Common keywords that often denote the final payable amount
+  const finalKeywords = [
+    "total",
+    "grand total",
+    "final",
+    "net amount",
+    "amount due",
+    "balance due",
+    "payable",
+  ];
+
+  // 1) Prefer explicit final keywords (ignoring "subtotal", "total price", etc.)
   for (const ln of lines) {
-    if (/total/i.test(ln) && !/subtotal/i.test(ln) && !/total\s*price/i.test(ln)) {
-      const v = pickAmountFromLine(ln);
-      if (v != null) return v;
+    if (finalKeywords.some(k => new RegExp(k, "i").test(ln))) {
+      if (!/subtotal/i.test(ln) && !/total\s*price/i.test(ln)) {
+        const v = pickAmountFromLine(ln);
+        if (v != null) return v;
+      }
     }
   }
 
-  // 2) Otherwise, grab all currency amounts and take the LAST one
+  // 2) Otherwise, grab all currency amounts and take the LAST one (often the payable)
   const matches = [...text.matchAll(/(?:rs\.?|inr|₹)\s*([0-9]{1,3}(?:[, ]?[0-9]{2,3})*(?:\.\d{1,2})?)/gi)];
   if (matches.length) {
     const last = matches[matches.length - 1];
