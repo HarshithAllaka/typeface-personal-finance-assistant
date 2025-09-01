@@ -23,9 +23,7 @@ export default function Receipts() {
     try {
       setUploading(true);
       // your existing OCR endpoint
-      const { data } = await api.post("/api/receipts/upload", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const { data } = await api.post("/api/receipts/upload", fd);
       // Expecting: { message, file, suggestions, rawText }
       setSuggestions(data.suggestions || null);
       setRawText(data.rawText || "");
