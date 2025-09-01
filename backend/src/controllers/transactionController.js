@@ -2,7 +2,16 @@
 const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const path = require('path');
+const os = require('os');
+const fs = require('fs/promises');
 const { extractTable } = require('../services/parseTablePdf');
+
+async function writeTemp(buffer, ext = '.pdf') {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'finsight-imp-'));
+  const filePath = path.join(dir, `import${ext}`);
+  await fs.writeFile(filePath, buffer);
+  return filePath;
+}
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Create
@@ -15,7 +24,7 @@ exports.create = async (req, res) => {
     }
 
     const txn = await Transaction.create({
-      user: req.userId, // Mongoose will cast to ObjectId
+      user: req.userId,
       type,
       amount,
       category,
@@ -92,14 +101,11 @@ exports.remove = async (req, res) => {
 };
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Analytics (by category & by date)
-// NOTE: Use ObjectId in $match so aggregation actually matches documents.
+// Analytics
 // ───────────────────────────────────────────────────────────────────────────────
 exports.analytics = async (req, res) => {
   try {
     const { from, to } = req.query;
-
-    // IMPORTANT: cast user id to ObjectId for $match
     const userObjectId = new mongoose.Types.ObjectId(req.userId);
 
     const match = { user: userObjectId };
@@ -111,14 +117,8 @@ exports.analytics = async (req, res) => {
 
     const byCategory = await Transaction.aggregate([
       { $match: match },
-      {
-        $group: {
-          _id: { category: '$category', type: '$type' },
-          total: { $sum: '$amount' },
-        },
-      },
+      { $group: { _id: { category: '$category', type: '$type' }, total: { $sum: '$amount' } } },
       { $project: { _id: 0, category: '$_id.category', type: '$_id.type', total: 1 } },
-      // optional sort for stable output
       { $sort: { category: 1, type: 1 } },
     ]);
 
@@ -126,10 +126,7 @@ exports.analytics = async (req, res) => {
       { $match: match },
       {
         $group: {
-          _id: {
-            d: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
-            type: '$type',
-          },
+          _id: { d: { $dateToString: { format: '%Y-%m-%d', date: '$date' } }, type: '$type' },
           total: { $sum: '$amount' },
         },
       },
@@ -144,41 +141,47 @@ exports.analytics = async (req, res) => {
 };
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Bulk Import from PDF (tabular)
-// ───────────────────────────────────────────────────────────────────────────────
 exports.importPdf = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const ext = path.extname(req.file.originalname || '').toLowerCase();
+
+    const { buffer, originalname = '' } = req.file;
+    const ext = path.extname(originalname).toLowerCase() || '.pdf';
     if (ext !== '.pdf') return res.status(415).json({ error: 'Only PDF is supported' });
 
-    const { rows, error } = await extractTable(req.file.path);
-    if (error) return res.status(400).json({ error });
+    let tmpPath;
+    try {
+      // extractTable expects a path → write temp
+      tmpPath = await writeTemp(buffer, '.pdf');
 
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return res.status(400).json({ error: 'No valid rows found in PDF' });
+      const { rows, error } = await extractTable(tmpPath);
+      if (error) return res.status(400).json({ error });
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ error: 'No valid rows found in PDF' });
+      }
+
+      const docs = rows.map(r => ({ ...r, user: req.userId }));
+      const result = await Transaction.insertMany(docs, { ordered: false });
+
+      res.status(201).json({ inserted: result.length });
+    } finally {
+      if (tmpPath) {
+        try { await fs.rm(path.dirname(tmpPath), { recursive: true, force: true }); } catch {}
+      }
     }
-
-    // attach user id to each row
-    const docs = rows.map(r => ({ ...r, user: req.userId }));
-    const result = await Transaction.insertMany(docs, { ordered: false });
-    res.status(201).json({ inserted: result.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 };
-// ───────────────────────────────────────────────────────────────────────────────
-// Summary: totals and recent transactions
-// GET /api/transactions/summary
+
 // ───────────────────────────────────────────────────────────────────────────────
 exports.summary = async (req, res) => {
   try {
     const user = req.userId;
 
-    // totals (income / expense)
     const buckets = await Transaction.aggregate([
-      { $match: { user: new (require('mongoose').Types.ObjectId)(user) } },
-      { $group: { _id: '$type', total: { $sum: '$amount' } } }
+      { $match: { user: new mongoose.Types.ObjectId(user) } },
+      { $group: { _id: '$type', total: { $sum: '$amount' } } },
     ]);
 
     let totalIncome = 0, totalExpense = 0;
@@ -187,7 +190,6 @@ exports.summary = async (req, res) => {
       if (b._id === 'expense') totalExpense = b.total;
     }
 
-    // recent 5
     const recent = await Transaction.find({ user })
       .sort({ date: -1, _id: -1 })
       .limit(5)
@@ -197,7 +199,7 @@ exports.summary = async (req, res) => {
       totalIncome,
       totalExpense,
       net: totalIncome - totalExpense,
-      recent
+      recent,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

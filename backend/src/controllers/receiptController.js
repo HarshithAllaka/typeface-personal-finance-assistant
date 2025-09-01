@@ -1,56 +1,73 @@
-const fs = require('fs/promises');
+// backend/src/controllers/receiptController.js
 const path = require('path');
+const os = require('os');
+const fs = require('fs/promises');
 const pdfParse = require('pdf-parse');
 const { parseAmountAndDate } = require('../utils/parseReceipt');
 
+// lazy-load helpers if present
 let runOcr = null;
 let extractTextWithPdfjs = null;
-// Lazy-load optional helpers; don't crash if they don't exist.
 try { ({ runOcr } = require('../services/ocr')); } catch (_) {}
 try { ({ extractTextWithPdfjs } = require('../services/pdfx')); } catch (_) {}
+
+async function writeTemp(buffer, ext = '') {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'finsight-'));
+  const filePath = path.join(dir, `upload${ext}`);
+  await fs.writeFile(filePath, buffer);
+  return filePath;
+}
 
 exports.upload = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field "file")' });
 
-    const ext = path.extname(req.file.originalname || '').toLowerCase();
-    const type = (req.file.mimetype || '').toLowerCase();
+    const { buffer, mimetype = '', originalname = '' } = req.file;
+    const ext = path.extname(originalname).toLowerCase();
+    const type = mimetype.toLowerCase();
+
     const isPdf = ext === '.pdf' || type.includes('pdf');
-    const isImage = type.startsWith('image/') || ['.png', '.jpg', '.jpeg', '.webp'].includes(ext);
+    const isImage =
+      type.startsWith('image/') ||
+      ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'].includes(ext);
 
     let rawText = '';
     let warning;
 
     if (isPdf) {
-      // 1) Try pdf-parse with a Buffer
+      // parse PDF directly from buffer
       try {
-        const buf = await fs.readFile(req.file.path);
-        const data = await pdfParse(buf);
+        const data = await pdfParse(buffer);
         rawText = (data.text || '').trim();
       } catch (e1) {
-        console.error('[receipts.upload] pdf-parse failed:', e1);
-        // 2) Fallback to pdfjs if available
+        // optional fallback if you have a PDF.js helper that takes a path
         if (extractTextWithPdfjs) {
+          let tmp;
           try {
-            rawText = await extractTextWithPdfjs(req.file.path);
+            tmp = await writeTemp(buffer, '.pdf');
+            rawText = await extractTextWithPdfjs(tmp);
           } catch (e2) {
-            console.error('[receipts.upload] pdfjs fallback failed:', e2);
             warning = `PDF parsing failed (${e1.message}).`;
+          } finally {
+            if (tmp) try { await fs.rm(path.dirname(tmp), { recursive: true, force: true }); } catch {}
           }
         } else {
-          warning = `PDF parsing failed (${e1.message}). pdfjs helper not installed.`;
+          warning = `PDF parsing failed (${e1.message}).`;
         }
       }
     } else if (isImage) {
-      if (runOcr) {
-        try {
-          rawText = await runOcr(req.file.path);
-        } catch (e) {
-          console.error('[receipts.upload] OCR failed:', e);
-          warning = `OCR failed (${e.message}).`;
-        }
-      } else {
+      if (!runOcr) {
         warning = 'OCR helper not installed. Upload a PDF or add OCR service.';
+      } else {
+        let tmp;
+        try {
+          tmp = await writeTemp(buffer, ext || '.png');
+          rawText = await runOcr(tmp);
+        } catch (e) {
+          warning = `OCR failed (${e.message}).`;
+        } finally {
+          if (tmp) try { await fs.rm(path.dirname(tmp), { recursive: true, force: true }); } catch {}
+        }
       }
     } else {
       warning = 'Unsupported file type. Please upload a PDF or image.';
@@ -67,10 +84,8 @@ exports.upload = async (req, res) => {
       };
     }
 
-    // If nothing worked, still return 200 with warning so UI can show preview/issues
     return res.status(200).json({
       message: 'Uploaded',
-      file: req.file.filename,
       suggestions,
       rawText,
       ...(warning ? { warning } : {}),
